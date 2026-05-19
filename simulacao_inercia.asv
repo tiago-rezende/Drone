@@ -1,0 +1,148 @@
+%% primeiro
+%definição do tamho do quadrotor e seu material
+%estimativa da massa e inercia
+clear
+clc
+close all
+%%
+%variaveis de escolha
+L_maior = 30; % cm
+w = 2; %cm
+b = 2; %cm
+densidade = 2; %g/cm3
+
+espesura_helice = 0.1;
+raio_helice = 6;
+
+
+altura_propeler = 2;
+raio = 0.5;
+densidade_cobre = 8.96 * 0.5;
+
+
+
+%%
+%script
+
+L_menor = (L_maior - w)/2; %cm
+
+massa_helice = pi * raio_helice^2 * espesura_helice * densidade;
+I_helice_x = massa_helice * raio_helice^2 / 4 + massa_helice * (L_maior/2)^2;
+I_helice_y = massa_helice * raio_helice^2 / 4 + massa_helice * (L_maior/2)^2;
+I_helice_z = massa_helice * raio_helice^2 / 2 + massa_helice * (L_maior/2)^2;
+I_helice_x_sem_eixo_paralelo = massa_helice * raio_helice^2 / 4;
+I_helice_y_sem_eixo_paralelo = massa_helice * raio_helice^2 / 4;
+
+massa_propeler = pi * raio * altura_propeler * densidade_cobre;
+I_propelerz = (massa_propeler * raio^2 + L_menor) + (massa_propeler * w/2^2);
+I_propelerx = (massa_propeler * (3 * raio^2 + altura_propeler^2))/12 + (massa_propeler * (altura_propeler/2 + b/2)^2);
+I_propelery = (massa_propeler * (3 * raio^2 + altura_propeler^2))/12 + (massa_propeler * (altura_propeler/2 + b/2)^2);
+I_propelerx_sem_eixo_paralelo = (massa_propeler * (3 * raio^2 + altura_propeler^2))/12;
+I_propelery_sem_eixo_paralelo = (massa_propeler * (3 * raio^2 + altura_propeler^2))/12;
+
+
+m_eixo_maior = L_maior * b^2 * densidade;
+I_eixo_maior_x = m_eixo_maior * (b^2 +b^2)/12;
+I_eixo_maior_y = m_eixo_maior * (L_maior^2 +b^2)/12;
+I_eixo_maior_z = m_eixo_maior * (b^2 +L_maior^2)/12;
+
+
+m_eixo_menor =  w * b^2 * densidade;
+% % I_eixo_menor_x = m_eixo_menor * (w^2 +b^2)/12;
+% % I_eixo_menor_y = m_eixo_menor * (L_menor^2 +b^2)/12 + m_eixo_menor*(w/2)^2;
+% % I_eixo_menor_z = m_eixo_menor * (w^2 +L_menor^2)/12 + m_eixo_menor*(w/2)^2;
+I_eixo_menor_x =  m_eixo_maior * (L_maior^2 +b^2)/12 - m_eixo_menor * (w^2 +b^2)/12 ;
+I_eixo_menor_y = I_eixo_maior_x - m_eixo_menor * (w^2 +b^2)/12;
+I_eixo_menor_z =I_eixo_maior_z - m_eixo_menor * (b^2 +w^2)/12;
+
+I_eixo_maior_x+I_eixo_menor_x-I_eixo_maior_y-I_eixo_menor_y
+
+Ix = 2*I_helice_x + 2*I_propelerx + 2*I_helice_x_sem_eixo_paralelo + 2*I_propelerx_sem_eixo_paralelo + I_eixo_maior_x + I_eixo_menor_x;
+Iy = 2*I_helice_y + 2*I_propelery + 2*I_helice_y_sem_eixo_paralelo + 2*I_propelery_sem_eixo_paralelo + I_eixo_maior_y + I_eixo_menor_y;
+Iz = 4*I_helice_z + 4*I_propelerz + I_eixo_maior_z + I_eixo_menor_z;
+tensor_de_inercia = [Ix, 0, 0; 0, Iy, 0; 0, 0, Iz];
+massa_total = 4*massa_propeler + 4 * massa_helice + m_eixo_maior + m_eixo_menor;
+
+
+%estimar Kt para para que 2T = meg, omega e livre
+%kq é 10s menor que Kt
+
+%inercia do propeler é um paralelepipedo girando mais uma casca cilindica
+%massa arbritaria mas que seja em torno de 1/10 da massa da estrutura
+
+%% forcas por eixo
+
+
+
+
+g = 9.81; %m/s^2
+velocidade_helice = 1;
+tempo_final = 10; %s
+steps_time = 10000;
+t = linspace(0,10,steps_time);
+step = tempo_final/steps_time;
+
+Jp = I_propelerx + I_propelery +I_propelerz + I_helice_x +I_helice_y + I_helice_z;
+quad = struct("Inertia", tensor_de_inercia, "mass", massa_total, "Prop", (I_helice_z+I_propelerz), "grav", g);
+velocidades_helices = [velocidade_helice;velocidade_helice;velocidade_helice;velocidade_helice];
+K_aero = massa_total*g/sum(velocidades_helices.^2,"all");
+k_drag = K_aero/10;
+
+U = [-K_aero, -K_aero, -K_aero, -K_aero; 0, -K_aero*L_maior/2, 0, K_aero*L_maior/2; K_aero*L_maior/2, 0, -K_aero*L_maior/2, 0; -k_drag, k_drag, -k_drag, k_drag];
+pos_linear = zeros(3,steps_time);
+vel_linear = zeros(3,steps_time);
+acel_linear = zeros(3,steps_time);
+pos_angular = zeros(3,steps_time);
+vel_angular = zeros(3,steps_time);
+acel_angular = zeros(3,steps_time);
+
+for i = 2:steps_time
+    forces = model(U,velocidades_helices,massa_total,Jp,Ix,Iy,Iz,vel_angular(:,i-1),pos_angular(:,i-1));
+    acel_linear(:,i) = forces(1:3,:);
+    vel_linear(:,i) = acel_linear(:,i) * step + vel_linear(:,i-1); 
+    pos_linear(:,i) = vel_linear(:,i) * step + pos_linear(:,i-1); 
+    
+    acel_angular(:,i) = forces(4:6,:);
+    vel_angular(:,i) = acel_angular(:,i) * step + vel_angular(:,i-1); 
+    pos_angular(:,i) = vel_angular(:,i) * step + pos_angular(:,i-1); 
+    
+end
+
+figure
+plot(t,acel_linear(:,:));
+title('aceleracao linear');
+legend('x', 'y','z');
+figure
+plot(t,vel_linear(:,:));
+title('vel linear');
+legend('x', 'y','z');
+figure
+plot(t,pos_linear(:,:));
+title('pos linear');
+legend('x', 'y','z');
+figure
+plot(t,acel_angular(:,:));
+title('aceleracao ang');
+legend('psi', 'theta','rho');
+figure
+plot(t,vel_angular(:,:));
+title('vel ang');
+legend('psi', 'theta','rho');
+figure
+plot(t,pos_angular(:,:));
+title('pos ang');
+legend('psi', 'theta','rho');
+function aceleracoes = model(U,velocidades_helices,massa_total,Jp,Ix,Iy,Iz, vel_angular,pos_angular)
+    thrust = U(1,:)*velocidades_helices.^2;
+    torques_psi = U(2,:)*velocidades_helices.^2;
+    torques_theta = U(3,:)*velocidades_helices.^2;
+    torques_phi = U(4,:)*(velocidades_helices.^2);
+    matriz_rotacional = eul2rotm(pos_angular');
+    aceleracoes_lineares = (1/massa_total)*([0;0;massa_total]+matriz_rotacional*[0;0;thrust]);
+    omega_r = velocidades_helices(1)+velocidades_helices(3)-velocidades_helices(2)-velocidades_helices(4);
+    forca_angular_x = vel_angular(2) * vel_angular(3) * (Iy-Iz)+ torques_psi + Jp * vel_angular(2) * omega_r;
+    forca_angular_y = vel_angular(1) * vel_angular(3) * (Iz-Ix)+ torques_theta - Jp * vel_angular(1) * omega_r;
+    forca_angular_z = vel_angular(2) * vel_angular(1) * (Ix-Iy)+ torques_phi + Jp * omega_r ;
+    aceleracoes_angulares = [forca_angular_x/Ix;forca_angular_y/Iy;forca_angular_z/Iz];
+    aceleracoes = [aceleracoes_lineares;aceleracoes_angulares];
+end
